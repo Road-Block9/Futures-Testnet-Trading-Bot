@@ -1,4 +1,4 @@
-# Binance Futures Testnet Trading Bot
+# Futures Testnet Trading Bot
 
 ## Overview
 
