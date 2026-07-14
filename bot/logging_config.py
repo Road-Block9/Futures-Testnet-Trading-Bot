@@ -14,22 +14,26 @@ LOG_FORMAT = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
 
 
 def configure_logging() -> logging.Logger:
-    """Configure one append-only UTF-8 file handler and return the app logger."""
-    LOG_DIRECTORY.mkdir(parents=True, exist_ok=True)
+    """Configure append-only logging, falling back safely on read-only hosts."""
     logger = logging.getLogger(LOGGER_NAME)
     logger.setLevel(logging.DEBUG)
     logger.propagate = False
 
-    expected_path = LOG_FILE.resolve()
-    for handler in logger.handlers:
-        if isinstance(handler, logging.FileHandler):
-            if Path(handler.baseFilename).resolve() == expected_path:
-                return logger
+    try:
+        LOG_DIRECTORY.mkdir(parents=True, exist_ok=True)
+        expected_path = LOG_FILE.resolve()
+        for handler in logger.handlers:
+            if isinstance(handler, logging.FileHandler):
+                if Path(handler.baseFilename).resolve() == expected_path:
+                    return logger
 
-    handler = logging.FileHandler(LOG_FILE, mode="a", encoding="utf-8")
-    handler.setLevel(logging.DEBUG)
-    handler.setFormatter(logging.Formatter(LOG_FORMAT))
-    logger.addHandler(handler)
+        handler = logging.FileHandler(LOG_FILE, mode="a", encoding="utf-8")
+        handler.setLevel(logging.DEBUG)
+        handler.setFormatter(logging.Formatter(LOG_FORMAT))
+        logger.addHandler(handler)
+    except OSError:
+        if not logger.handlers:
+            logger.addHandler(logging.NullHandler())
     return logger
 
 

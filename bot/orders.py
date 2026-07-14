@@ -11,6 +11,8 @@ from bot.client import (
     BinanceFuturesClient,
     BinanceFuturesClientError,
     BinanceSymbolNotFoundError,
+    create_binance_client,
+    validate_futures_symbol,
 )
 from bot.logging_config import safe_log_value
 from bot.validators import (
@@ -68,7 +70,7 @@ class FuturesOrderService:
                 quantity=quantity,
                 price=price,
             )
-            symbol_info = self._client.get_futures_symbol_info(order.symbol)
+            symbol_info = validate_futures_symbol(order.symbol, self._client)
             validate_exchange_rules(order, symbol_info)
             payload = self._build_payload(order)
             self._log_order_request(payload)
@@ -109,7 +111,10 @@ class FuturesOrderService:
                 "ORDER_FAILED stage=unexpected error_type=%s",
                 type(exc).__name__,
             )
-            raise
+            raise OrderServiceError(
+                "An unexpected error occurred while processing the Futures "
+                "Testnet order."
+            ) from exc
 
     def _log_order_request(self, payload: Mapping[str, str]) -> None:
         details = [
@@ -208,3 +213,23 @@ def _safe_text(value: Any, fallback: str = "") -> str:
     if value is None or value == "":
         return fallback
     return str(value)
+
+
+def place_futures_order(
+    *,
+    symbol: str,
+    side: str,
+    order_type: str,
+    quantity: str | Decimal,
+    price: str | Decimal | None = None,
+    client: BinanceFuturesClient | None = None,
+) -> OrderResult:
+    """Place a validated Testnet order without depending on the Typer CLI."""
+    active_client = client or create_binance_client()
+    return FuturesOrderService(active_client).place_order(
+        symbol=symbol,
+        side=side,
+        order_type=order_type,
+        quantity=quantity,
+        price=price,
+    )

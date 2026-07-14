@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -14,6 +15,7 @@ from binance.exceptions import BinanceAPIException, BinanceRequestException
 from dotenv import load_dotenv
 
 from bot.logging_config import safe_log_value
+from bot.validators import validate_symbol
 
 
 EXPECTED_TESTNET_URL = "https://testnet.binancefuture.com"
@@ -53,19 +55,60 @@ class BinanceSymbolNotFoundError(BinanceServiceError):
     """Raised when Futures exchange information lacks a requested symbol."""
 
 
+@dataclass(frozen=True)
+class ConnectionStatus:
+    """Result of one connection check without exposing implementation details."""
+
+    ok: bool
+    error_message: str | None = None
+    error_type: str | None = None
+    unexpected: bool = False
+
+
+@dataclass(frozen=True)
+class ConnectionCheckResult:
+    """Structured result from public and authenticated connection checks."""
+
+    base_url: str
+    api_key_configured: bool
+    api_secret_configured: bool
+    public: ConnectionStatus
+    authenticated: ConnectionStatus
+
+    @property
+    def success(self) -> bool:
+        """Return whether both connection checks succeeded."""
+        return self.public.ok and self.authenticated.ok
+
+
 class BinanceFuturesClient:
     """Small synchronous wrapper for safe USDT-M Futures Testnet checks."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        api_secret: str | None = None,
+        base_url: str | None = None,
+    ) -> None:
         """Load configuration and prepare a non-pinging testnet client."""
         env_path = Path(__file__).resolve().parents[1] / ".env"
         load_dotenv(dotenv_path=env_path, override=False)
 
-        self._api_key = os.getenv("BINANCE_API_KEY", "").strip()
-        self._api_secret = os.getenv("BINANCE_API_SECRET", "").strip()
-        self._base_url = os.getenv(
-            "BINANCE_BASE_URL", EXPECTED_TESTNET_URL
-        ).strip().rstrip("/")
+        self._api_key = (
+            api_key if api_key is not None else os.getenv("BINANCE_API_KEY", "")
+        ).strip()
+        self._api_secret = (
+            api_secret
+            if api_secret is not None
+            else os.getenv("BINANCE_API_SECRET", "")
+        ).strip()
+        configured_base_url = (
+            base_url
+            if base_url is not None
+            else os.getenv("BINANCE_BASE_URL", EXPECTED_TESTNET_URL)
+        )
+        self._base_url = configured_base_url.strip().rstrip("/")
 
         self._validate_base_url()
         self._client = self._create_client()
@@ -145,6 +188,71 @@ class BinanceFuturesClient:
         raise BinanceSymbolNotFoundError(
             f"Symbol {symbol} was not found on Binance Futures Testnet."
         )
+
+    def get_futures_mark_price(self, symbol: str) -> str:
+        """Return the current public Futures Testnet mark price for a symbol."""
+        response = self._call(
+            lambda: self._client.futures_mark_price(symbol=symbol),
+            authenticated=False,
+            operation_name="futures_mark_price",
+        )
+        if not isinstance(response, dict) or response.get("markPrice") in {None, ""}:
+            raise BinanceServiceError(
+                "Binance returned an unexpected Futures mark-price response."
+            )
+        logger.debug("MARK_PRICE_FOUND symbol=%s", safe_log_value(symbol))
+        return str(response["markPrice"])
+
+    def get_futures_account_snapshot(self) -> dict[str, Any]:
+        """Return a read-only authenticated Futures Testnet account snapshot."""
+        self._validate_credentials()
+        response = self._call(
+            self._client.futures_account,
+            authenticated=True,
+            operation_name="futures_account",
+        )
+        if not isinstance(response, dict):
+            raise BinanceServiceError(
+                "Binance returned an unexpected Futures account response."
+            )
+        return response
+
+    def get_futures_open_orders(
+        self, symbol: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Return current open orders, optionally limited to one symbol."""
+        self._validate_credentials()
+        validated_symbol = validate_symbol(symbol) if symbol is not None else None
+        response = self._call(
+            (
+                lambda: self._client.futures_get_open_orders(symbol=validated_symbol)
+                if validated_symbol is not None
+                else self._client.futures_get_open_orders()
+            ),
+            authenticated=True,
+            operation_name="futures_get_open_orders",
+        )
+        if not isinstance(response, list):
+            raise BinanceServiceError(
+                "Binance returned an unexpected open-orders response."
+            )
+        return [item for item in response if isinstance(item, dict)]
+
+    def get_futures_recent_orders(
+        self, symbol: str, *, limit: int = 50
+    ) -> list[dict[str, Any]]:
+        """Return recent orders for one Futures Testnet symbol."""
+        self._validate_credentials()
+        response = self._call(
+            lambda: self._client.futures_get_all_orders(symbol=symbol, limit=limit),
+            authenticated=True,
+            operation_name="futures_get_all_orders",
+        )
+        if not isinstance(response, list):
+            raise BinanceServiceError(
+                "Binance returned an unexpected recent-orders response."
+            )
+        return [item for item in response if isinstance(item, dict)]
 
     def place_futures_order(self, **params: str) -> dict[str, Any]:
         """Submit a validated Futures order using python-binance."""
@@ -270,3 +378,77 @@ class BinanceFuturesClient:
             raise BinanceUnexpectedError(
                 "An unexpected error occurred during the Binance Futures request."
             ) from exc
+
+
+def create_binance_client(
+    *,
+    api_key: str | None = None,
+    api_secret: str | None = None,
+    base_url: str | None = None,
+) -> BinanceFuturesClient:
+    """Create a Testnet client using explicit values or local environment config."""
+    return BinanceFuturesClient(
+        api_key=api_key,
+        api_secret=api_secret,
+        base_url=base_url,
+    )
+
+
+def check_binance_connection(
+    client: BinanceFuturesClient | None = None,
+) -> ConnectionCheckResult:
+    """Run public and authenticated checks and return structured status data."""
+    active_client = client or create_binance_client()
+    return ConnectionCheckResult(
+        base_url=active_client.base_url,
+        api_key_configured=active_client.api_key_configured,
+        api_secret_configured=active_client.api_secret_configured,
+        public=_connection_status(
+            active_client.test_public_connection,
+            "Public connection check failed due to an unexpected error.",
+        ),
+        authenticated=_connection_status(
+            active_client.test_authenticated_connection,
+            "Authenticated connection check failed due to an unexpected error.",
+        ),
+    )
+
+
+def validate_futures_symbol(
+    symbol: str,
+    client: BinanceFuturesClient | None = None,
+) -> dict[str, Any]:
+    """Validate local symbol syntax and return its Testnet exchange metadata."""
+    validated_symbol = validate_symbol(symbol)
+    active_client = client or create_binance_client()
+    return active_client.get_futures_symbol_info(validated_symbol)
+
+
+def get_futures_market_price(
+    symbol: str,
+    client: BinanceFuturesClient | None = None,
+) -> str:
+    """Validate a symbol and return its current public Testnet mark price."""
+    validated_symbol = validate_symbol(symbol)
+    active_client = client or create_binance_client()
+    return active_client.get_futures_mark_price(validated_symbol)
+
+
+def _connection_status(
+    check: Callable[[], bool], unexpected_message: str
+) -> ConnectionStatus:
+    try:
+        return ConnectionStatus(ok=check())
+    except BinanceFuturesClientError as exc:
+        return ConnectionStatus(
+            ok=False,
+            error_message=str(exc),
+            error_type=type(exc).__name__,
+        )
+    except Exception as exc:
+        return ConnectionStatus(
+            ok=False,
+            error_message=unexpected_message,
+            error_type=type(exc).__name__,
+            unexpected=True,
+        )

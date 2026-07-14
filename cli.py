@@ -5,9 +5,13 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
-from bot.client import BinanceFuturesClient, BinanceFuturesClientError
+from bot.client import (
+    BinanceFuturesClientError,
+    check_binance_connection,
+    create_binance_client,
+)
 from bot.logging_config import configure_logging, safe_log_value
-from bot.orders import FuturesOrderService, OrderResult, OrderServiceError
+from bot.orders import OrderResult, OrderServiceError, place_futures_order
 from bot.validators import OrderValidationError, validate_order_input
 
 
@@ -31,7 +35,7 @@ def check_connection() -> None:
     console.print("[bold]Binance Futures Testnet connection check[/bold]")
 
     try:
-        client = BinanceFuturesClient()
+        client = create_binance_client()
     except BinanceFuturesClientError as exc:
         logger.error(
             "CONNECTION_FAILED stage=configuration error_type=%s reason=%s",
@@ -54,48 +58,48 @@ def check_connection() -> None:
     console.print(f"API key configured: {_yes_no(client.api_key_configured)}")
     console.print(f"API secret configured: {_yes_no(client.api_secret_configured)}")
 
-    public_ok = False
-    authenticated_ok = False
-
-    try:
-        public_ok = client.test_public_connection()
+    result = check_binance_connection(client)
+    if result.public.ok:
         console.print("Public API connection: [green]Success[/green]")
-    except BinanceFuturesClientError as exc:
-        logger.error(
-            "CONNECTION_FAILED kind=public error_type=%s reason=%s",
-            type(exc).__name__,
-            safe_log_value(exc),
-        )
-        console.print(f"Public API connection: [red]Failed - {escape(str(exc))}[/red]")
-    except Exception as exc:
+    elif result.public.unexpected:
         logger.error(
             "CONNECTION_FAILED kind=public error_type=%s",
-            type(exc).__name__,
+            result.public.error_type,
         )
         console.print("Public API connection: [red]Failed - unexpected error.[/red]")
-
-    try:
-        authenticated_ok = client.test_authenticated_connection()
-        console.print("Authenticated API connection: [green]Success[/green]")
-    except BinanceFuturesClientError as exc:
+    else:
         logger.error(
-            "CONNECTION_FAILED kind=authenticated error_type=%s reason=%s",
-            type(exc).__name__,
-            safe_log_value(exc),
+            "CONNECTION_FAILED kind=public error_type=%s reason=%s",
+            result.public.error_type,
+            safe_log_value(result.public.error_message),
         )
         console.print(
-            f"Authenticated API connection: [red]Failed - {escape(str(exc))}[/red]"
+            "Public API connection: "
+            f"[red]Failed - {escape(result.public.error_message or '')}[/red]"
         )
-    except Exception as exc:
+
+    if result.authenticated.ok:
+        console.print("Authenticated API connection: [green]Success[/green]")
+    elif result.authenticated.unexpected:
         logger.error(
             "CONNECTION_FAILED kind=authenticated error_type=%s",
-            type(exc).__name__,
+            result.authenticated.error_type,
         )
         console.print(
             "Authenticated API connection: [red]Failed - unexpected error.[/red]"
         )
+    else:
+        logger.error(
+            "CONNECTION_FAILED kind=authenticated error_type=%s reason=%s",
+            result.authenticated.error_type,
+            safe_log_value(result.authenticated.error_message),
+        )
+        console.print(
+            "Authenticated API connection: "
+            f"[red]Failed - {escape(result.authenticated.error_message or '')}[/red]"
+        )
 
-    if public_ok and authenticated_ok:
+    if result.success:
         logger.info("COMMAND_SUCCESS command=check-connection")
         console.print("[bold green]Connection check succeeded.[/bold green]")
         return
@@ -166,14 +170,14 @@ def place_order(
         raise typer.Exit(code=1)
 
     try:
-        client = BinanceFuturesClient()
-        service = FuturesOrderService(client)
-        result = service.place_order(
+        client = create_binance_client()
+        result = place_futures_order(
             symbol=validated.symbol,
             side=validated.side,
             order_type=validated.order_type,
             quantity=validated.quantity,
             price=validated.price,
+            client=client,
         )
     except (OrderValidationError, BinanceFuturesClientError, OrderServiceError) as exc:
         logger.error(

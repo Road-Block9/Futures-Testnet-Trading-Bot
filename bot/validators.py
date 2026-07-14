@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_CEILING, Decimal, InvalidOperation
 from typing import Any, Mapping
 
 
@@ -36,6 +36,19 @@ class ValidatedOrderInput:
     order_type: str
     quantity: Decimal
     price: Decimal | None
+
+
+@dataclass(frozen=True)
+class QuantityRules:
+    """Normalized Binance quantity and minimum-notional guidance."""
+
+    filter_name: str
+    minimum_quantity: Decimal | None
+    maximum_quantity: Decimal | None
+    step_size: Decimal | None
+    minimum_notional: Decimal | None
+    reference_price: Decimal | None
+    estimated_minimum_quantity: Decimal | None
 
 
 def validate_symbol(symbol: str) -> str:
@@ -108,6 +121,103 @@ def validate_order_input(
         quantity=validate_decimal(quantity, "quantity"),
         price=validated_price,
     )
+
+
+def build_quantity_rules(
+    *,
+    symbol_info: Mapping[str, Any],
+    order_type: str,
+    reference_price: str | Decimal | None = None,
+) -> QuantityRules:
+    """Build quantity guidance from Binance LOT and notional filters."""
+    validated_type = validate_order_type(order_type)
+    raw_filters = symbol_info.get("filters", [])
+    if not isinstance(raw_filters, list):
+        raise ExchangeFilterError("Binance returned invalid symbol filter data.")
+    filters = {
+        item.get("filterType"): item
+        for item in raw_filters
+        if isinstance(item, Mapping) and item.get("filterType")
+    }
+
+    filter_name = (
+        "MARKET_LOT_SIZE"
+        if validated_type == "MARKET" and "MARKET_LOT_SIZE" in filters
+        else "LOT_SIZE"
+    )
+    quantity_filter = filters.get(filter_name, {})
+    minimum_quantity = _filter_decimal(quantity_filter, "minQty")
+    maximum_quantity = _filter_decimal(quantity_filter, "maxQty")
+    step_size = _filter_decimal(quantity_filter, "stepSize")
+
+    notional_filter = filters.get("MIN_NOTIONAL") or filters.get("NOTIONAL")
+    minimum_notional = None
+    if notional_filter:
+        applies_to_market = not _filter_flag_is_false(
+            notional_filter.get(
+                "applyToMarket", notional_filter.get("applyMinToMarket", True)
+            )
+        )
+        if validated_type != "MARKET" or applies_to_market:
+            minimum_notional = _filter_decimal(notional_filter, "notional")
+            if minimum_notional is None:
+                minimum_notional = _filter_decimal(notional_filter, "minNotional")
+
+    parsed_price = (
+        validate_decimal(reference_price, "reference price")
+        if reference_price is not None and str(reference_price).strip()
+        else None
+    )
+    estimated_minimum = minimum_quantity
+    if minimum_notional is not None and parsed_price is not None:
+        notional_quantity = minimum_notional / parsed_price
+        if estimated_minimum is None or notional_quantity > estimated_minimum:
+            estimated_minimum = notional_quantity
+    if estimated_minimum is not None and step_size is not None:
+        estimated_minimum = (
+            estimated_minimum / step_size
+        ).to_integral_value(rounding=ROUND_CEILING) * step_size
+
+    return QuantityRules(
+        filter_name=filter_name,
+        minimum_quantity=minimum_quantity,
+        maximum_quantity=maximum_quantity,
+        step_size=step_size,
+        minimum_notional=minimum_notional,
+        reference_price=parsed_price,
+        estimated_minimum_quantity=estimated_minimum,
+    )
+
+
+def validate_quantity_rules(
+    quantity: str | Decimal,
+    rules: QuantityRules,
+) -> Decimal:
+    """Validate quantity and explain the estimated notional-driven minimum."""
+    parsed_quantity = validate_decimal(quantity, "quantity")
+    required = rules.estimated_minimum_quantity
+    if required is not None and parsed_quantity < required:
+        message = (
+            f"Quantity {format_decimal(parsed_quantity)} is below the required "
+            f"minimum quantity {format_decimal(required)}"
+        )
+        if rules.minimum_notional is not None and rules.reference_price is not None:
+            message += (
+                f" to meet the minimum order value "
+                f"{format_decimal(rules.minimum_notional)} USDT at the current "
+                f"price {format_decimal(rules.reference_price)}"
+            )
+        raise ExchangeFilterError(message + ".")
+
+    _validate_range_and_increment(
+        value=parsed_quantity,
+        minimum=rules.minimum_quantity,
+        maximum=rules.maximum_quantity,
+        increment=rules.step_size,
+        field_name="Quantity",
+        increment_name="step size",
+    )
+    return parsed_quantity
 
 
 def validate_exchange_rules(
@@ -187,6 +297,10 @@ def _filter_decimal(
             f"Binance returned an invalid {field_name} filter value."
         ) from exc
     return value if value > 0 else None
+
+
+def _filter_flag_is_false(value: Any) -> bool:
+    return value is False or str(value).strip().lower() == "false"
 
 
 def _validate_range_and_increment(
