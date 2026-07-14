@@ -1,0 +1,24 @@
+2026-07-14 13:08:08,990 | INFO | trading_bot | COMMAND_START command=place-order
+2026-07-14 13:08:11,119 | DEBUG | trading_bot.client | CLIENT_INITIALIZED environment=testnet base_url=https://testnet.binancefuture.com
+2026-07-14 13:08:11,905 | DEBUG | trading_bot.client | API_RESPONSE operation=futures_exchange_info symbols=724
+2026-07-14 13:08:11,906 | DEBUG | trading_bot.client | SYMBOL_INFO_FOUND symbol=BTCUSDT
+2026-07-14 13:08:11,908 | INFO | trading_bot.orders | ORDER_REQUEST environment=Binance_Futures_Testnet base_url=https://testnet.binancefuture.com symbol=BTCUSDT side=BUY type=MARKET quantity=0.002
+2026-07-14 13:08:11,908 | INFO | trading_bot.client | API_REQUEST operation=futures_create_order symbol=BTCUSDT type=MARKET
+2026-07-14 13:08:12,169 | INFO | trading_bot.orders | ORDER_SUCCESS type=MARKET orderId=21620149253 symbol=BTCUSDT side=BUY status=NEW origQty=0.0020 executedQty=0.0000 price=0.00 avgPrice=
+2026-07-14 13:08:12,173 | INFO | trading_bot | COMMAND_SUCCESS command=place-order orderId=21620149253 type=MARKET
+2026-07-14 13:08:40,782 | INFO | trading_bot | COMMAND_START command=place-order
+2026-07-14 13:08:42,922 | DEBUG | trading_bot.client | CLIENT_INITIALIZED environment=testnet base_url=https://testnet.binancefuture.com
+2026-07-14 13:08:43,665 | DEBUG | trading_bot.client | API_RESPONSE operation=futures_exchange_info symbols=724
+2026-07-14 13:08:43,665 | DEBUG | trading_bot.client | SYMBOL_INFO_FOUND symbol=BTCUSDT
+2026-07-14 13:08:43,666 | INFO | trading_bot.orders | ORDER_REQUEST environment=Binance_Futures_Testnet base_url=https://testnet.binancefuture.com symbol=BTCUSDT side=SELL type=LIMIT quantity=0.002 price=130000 timeInForce=GTC
+2026-07-14 13:08:43,666 | INFO | trading_bot.client | API_REQUEST operation=futures_create_order symbol=BTCUSDT type=LIMIT
+2026-07-14 13:08:43,931 | INFO | trading_bot.orders | ORDER_SUCCESS type=LIMIT orderId=21620238824 symbol=BTCUSDT side=SELL status=NEW origQty=0.0020 executedQty=0.0000 price=130000.00 avgPrice=
+2026-07-14 13:08:43,932 | INFO | trading_bot | COMMAND_SUCCESS command=place-order orderId=21620238824 type=LIMIT
+2026-07-14 13:12:25,490 | INFO | trading_bot | COMMAND_START command=place-order
+2026-07-14 13:12:26,830 | DEBUG | trading_bot.client | CLIENT_INITIALIZED environment=testnet base_url=https://testnet.binancefuture.com
+2026-07-14 13:12:27,439 | DEBUG | trading_bot.client | API_RESPONSE operation=futures_exchange_info symbols=724
+2026-07-14 13:12:27,439 | DEBUG | trading_bot.client | SYMBOL_INFO_FOUND symbol=BTCUSDT
+2026-07-14 13:12:27,440 | INFO | trading_bot.orders | ORDER_REQUEST environment=Binance_Futures_Testnet base_url=https://testnet.binancefuture.com symbol=BTCUSDT side=BUY type=MARKET quantity=0.002
+2026-07-14 13:12:27,440 | INFO | trading_bot.client | API_REQUEST operation=futures_create_order symbol=BTCUSDT type=MARKET
+2026-07-14 13:12:27,830 | INFO | trading_bot.orders | ORDER_SUCCESS type=MARKET orderId=21620906084 symbol=BTCUSDT side=BUY status=FILLED origQty=0.0020 executedQty=0.0020 price=0.00 avgPrice=
+2026-07-14 13:12:27,832 | INFO | trading_bot | COMMAND_SUCCESS command=place-order orderId=21620906084 type=MARKET
